@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ISS-Tracker – Live Position der Internationalen Raumstation</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+:root {
+  --bg:#03050f; --bg2:#050915; --surface:#080d1e; --surface2:#0e1530;
+  --cyan:#00e5ff; --violet:#7c3aed; --white:#dce8ff; --muted:#3a4a6a;
+  --border:rgba(0,229,255,0.12); --radius:12px; --mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;background:var(--bg);color:var(--white);font-family:'Inter',sans-serif;font-size:14px;}
+nav{position:fixed;top:0;left:0;right:0;z-index:1000;background:rgba(3,5,15,0.95);border-bottom:1px solid var(--border);backdrop-filter:blur(12px);}
+.nav-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;height:52px;padding:0 1.5rem;gap:.75rem;}
+.nav-brand{font-family:'Outfit',sans-serif;font-size:1.2rem;font-weight:800;color:var(--cyan);text-decoration:none;letter-spacing:.03em;white-space:nowrap;}
+.nav-brand span{color:var(--white);}
+.stat-bar{display:flex;gap:1.5rem;margin-left:auto;flex-wrap:wrap;}
+.stat-item{text-align:right;}
+.stat-item .lbl{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;}
+.stat-item .val{font-family:var(--mono);font-size:.85rem;color:var(--cyan);}
+
+/* MAP fills viewport minus nav */
+#map{position:fixed;top:52px;left:0;right:0;bottom:0;z-index:1;}
+
+/* Custom leaflet dark tiles */
+.leaflet-container{background:#03050f;}
+
+/* SIDE PANEL */
+#panel{position:fixed;top:64px;right:12px;z-index:500;width:260px;display:flex;flex-direction:column;gap:.6rem;pointer-events:none;}
+.panel-card{background:rgba(8,13,30,0.92);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;pointer-events:all;backdrop-filter:blur(10px);}
+.panel-card h3{font-family:'Outfit',sans-serif;font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--cyan);margin-bottom:.65rem;}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:.2rem 0;border-bottom:1px solid rgba(0,229,255,.05);}
+.info-row:last-child{border-bottom:none;}
+.info-row .k{font-size:.72rem;color:var(--muted);}
+.info-row .v{font-family:var(--mono);font-size:.82rem;color:var(--white);}
+
+/* ISS icon */
+.iss-icon{display:flex;align-items:center;justify-content:center;font-size:1.6rem;animation:pulse 2s ease infinite;}
+@keyframes pulse{0%,100%{transform:scale(1);}50%{transform:scale(1.15);}}
+
+/* Orbit path style via Leaflet Polyline */
+
+/* Crew list */
+.crew-item{padding:.35rem 0;border-bottom:1px solid rgba(0,229,255,.05);font-size:.82rem;}
+.crew-item:last-child{border-bottom:none;}
+.crew-item .craft{font-size:.68rem;color:var(--muted);}
+
+/* BOTTOM BAR on mobile */
+@media(max-width:640px){
+  #panel{top:auto;bottom:64px;right:8px;left:8px;width:auto;flex-direction:row;flex-wrap:wrap;}
+  .panel-card{flex:1;min-width:140px;}
+  .stat-bar{display:none;}
+}
+
+.pulse-dot{width:10px;height:10px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 0 rgba(0,229,255,.4);animation:dotPulse 1.5s ease-out infinite;}
+@keyframes dotPulse{0%{box-shadow:0 0 0 0 rgba(0,229,255,.4);}70%{box-shadow:0 0 0 10px rgba(0,229,255,0);}100%{box-shadow:0 0 0 0 rgba(0,229,255,0);}}
+.live-indicator{display:flex;align-items:center;gap:.5rem;font-size:.72rem;color:var(--cyan);}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">🛰 <span>ISS</span>TRACKER</a>
+    <div class="stat-bar">
+      <div class="stat-item"><div class="lbl">Lat</div><div class="val" id="nav-lat">–</div></div>
+      <div class="stat-item"><div class="lbl">Lon</div><div class="val" id="nav-lon">–</div></div>
+      <div class="stat-item"><div class="lbl">Höhe</div><div class="val" id="nav-alt">–</div></div>
+      <div class="stat-item"><div class="lbl">Geschw.</div><div class="val" id="nav-vel">–</div></div>
+    </div>
+  </div>
+</nav>
+
+<div id="map"></div>
+
+<div id="panel">
+  <div class="panel-card">
+    <h3>🛰 Position</h3>
+    <div class="live-indicator"><div class="pulse-dot"></div>LIVE</div>
+    <div style="margin-top:.5rem">
+      <div class="info-row"><span class="k">Breitengrad</span><span class="v" id="p-lat">–</span></div>
+      <div class="info-row"><span class="k">Längengrad</span><span class="v" id="p-lon">–</span></div>
+      <div class="info-row"><span class="k">Höhe</span><span class="v" id="p-alt">–</span></div>
+      <div class="info-row"><span class="k">Geschwindigkeit</span><span class="v" id="p-vel">–</span></div>
+      <div class="info-row"><span class="k">Sichtbarkeit</span><span class="v" id="p-vis">–</span></div>
+    </div>
+  </div>
+  <div class="panel-card">
+    <h3>👨‍🚀 Crew</h3>
+    <div id="crew-list"><div style="color:var(--muted);font-size:.8rem">Lade…</div></div>
+    <div style="font-size:.68rem;color:var(--muted);margin-top:.5rem" id="crew-count"></div>
+  </div>
+  <div class="panel-card">
+    <h3>⏱ Aktualisierung</h3>
+    <div class="info-row"><span class="k">Interval</span><span class="v">5 Sek.</span></div>
+    <div class="info-row"><span class="k">Zuletzt</span><span class="v" id="last-update">–</span></div>
+    <div class="info-row"><span class="k">Umlaufzeit</span><span class="v">≈ 92 Min</span></div>
+    <div class="info-row"><span class="k">Umläufe/Tag</span><span class="v">≈ 15,5</span></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Leaflet Map ──
+const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([0, 0], 2);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors © <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd', maxZoom: 19,
+}).addTo(map);
+
+// ISS Icon
+const issIcon = L.divIcon({
+  html: '<div style="font-size:2rem;filter:drop-shadow(0 0 8px #00e5ff)">🛰</div>',
+  iconSize: [40, 40], iconAnchor: [20, 20], className: '',
+});
+
+let issMarker = null;
+let orbitPath = null;
+let pathCoords = [];
+let lastLon = null;
+let followed = true;
+
+// ── Fetch ISS Position ──
+async function fetchISS() {
+  try {
+    const r = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
+    const d = await r.json();
+    updateMap(d);
+    updatePanel(d);
+  } catch(e) {
+    // Fallback: Open Notify
+    try {
+      const r2 = await fetch('https://api.open-notify.org/iss-now.json');
+      const d2 = await r2.json();
+      const pos = { latitude: parseFloat(d2.iss_position.latitude), longitude: parseFloat(d2.iss_position.longitude), altitude: 408, velocity: 27600, visibility: 'daylight' };
+      updateMap(pos);
+      updatePanel(pos);
+    } catch(e2) {}
+  }
+}
+
+function updateMap(d) {
+  const lat = d.latitude, lon = d.longitude;
+
+  if (!issMarker) {
+    issMarker = L.marker([lat, lon], { icon: issIcon }).addTo(map)
+      .bindPopup(`<b>ISS</b><br>Lat: ${lat.toFixed(4)}<br>Lon: ${lon.toFixed(4)}<br>Höhe: ${d.altitude?.toFixed(0)||'408'} km`);
+  } else {
+    issMarker.setLatLng([lat, lon]);
+    issMarker.setPopupContent(`<b>ISS</b><br>Lat: ${lat.toFixed(4)}<br>Lon: ${lon.toFixed(4)}<br>Höhe: ${d.altitude?.toFixed(0)||'408'} km`);
+  }
+
+  // Orbit trail (last ~30 positions, handle date-line wrap)
+  if (lastLon !== null && Math.abs(lon - lastLon) > 180) {
+    // Crossed antimeridian – start new segment
+    if (orbitPath) map.removeLayer(orbitPath);
+    pathCoords = [];
+  }
+  pathCoords.push([lat, lon]);
+  if (pathCoords.length > 80) pathCoords.shift();
+  lastLon = lon;
+
+  if (orbitPath) map.removeLayer(orbitPath);
+  orbitPath = L.polyline(pathCoords, { color: '#00e5ff', weight: 1.5, opacity: 0.4, dashArray: '4 4' }).addTo(map);
+
+  if (followed) map.panTo([lat, lon], { animate: true, duration: 1 });
+}
+
+function updatePanel(d) {
+  const lat = d.latitude, lon = d.longitude;
+  const alt = d.altitude || 408;
+  const vel = d.velocity ? (d.velocity).toFixed(0) : '27600';
+
+  [['p-lat', lat.toFixed(4) + '°'], ['p-lon', lon.toFixed(4) + '°'],
+   ['p-alt', alt.toFixed(1) + ' km'], ['p-vel', Number(vel).toLocaleString('de-DE') + ' km/h'],
+   ['p-vis', d.visibility || '–']].forEach(([id, v]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v;
+  });
+  document.getElementById('nav-lat').textContent = lat.toFixed(2) + '°';
+  document.getElementById('nav-lon').textContent = lon.toFixed(2) + '°';
+  document.getElementById('nav-alt').textContent = alt.toFixed(0) + ' km';
+  document.getElementById('nav-vel').textContent = Number(vel).toLocaleString('de-DE') + ' km/h';
+  document.getElementById('last-update').textContent = new Date().toLocaleTimeString('de-DE');
+}
+
+// ── Fetch Crew ──
+async function fetchCrew() {
+  try {
+    const r = await fetch('https://api.open-notify.org/astros.json');
+    const d = await r.json();
+    const issAstros = d.people.filter(p => p.craft === 'ISS');
+    document.getElementById('crew-list').innerHTML = issAstros.map(p =>
+      `<div class="crew-item">👨‍🚀 ${p.name}<div class="craft">${p.craft}</div></div>`).join('');
+    document.getElementById('crew-count').textContent = `${issAstros.length} Personen an Bord · ${d.number} im All gesamt`;
+  } catch(e) {
+    document.getElementById('crew-list').innerHTML = '<div style="color:var(--muted);font-size:.8rem">Nicht verfügbar</div>';
+  }
+}
+
+// Toggle follow
+map.on('dragstart', () => { followed = false; });
+document.addEventListener('keydown', e => { if (e.key === 'f' || e.key === 'F') { followed = true; } });
+
+// ── Init ──
+fetchISS();
+fetchCrew();
+setInterval(fetchISS, 5000);
+</script>
+</body></html>
